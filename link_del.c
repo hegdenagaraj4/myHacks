@@ -36,23 +36,22 @@ void printList(Node *node)
 
 Node * delete_list(int listSize, Node **node, int num)
 { 
-    Node *head = *node, *temp = *node, *cur = NULL, *prev = NULL;
+    LinkedListNode *head = *node, *temp = *node, *cur = NULL, *prev = NULL;
     while(temp!=NULL){
         //check if the first element is the node to be deleted
         if(temp == head && temp->data > num){
             cur = temp;
             temp = temp->next;
-            head = temp;
             free(cur);
-            printList(*node);
+            head = temp;
         } 
         //to all other nodes
         else if( temp->next!=NULL && temp->next->data > num) {
             prev = temp;
             prev->next = temp->next->next;
             cur = temp->next;
-            temp = prev;
             free(cur);
+            temp = prev;
         }
         else 
             temp = temp->next;
@@ -67,7 +66,6 @@ int main(int args, char *argv[])
     scanf("%d", &listSize);
     
     Node *node = NULL, *temp=NULL;
-    //node = malloc(sizeof(Node)*listSize);
     for(i=0; i<listSize; i++){
         scanf("%d", &data);
         insertNode(&node,data);
