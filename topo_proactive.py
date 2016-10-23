@@ -51,7 +51,10 @@ adjacency = defaultdict(lambda:defaultdict(lambda:None))
 switches_by_dpid = {}
 switches_by_id = {}
 
+switch_port_map = defaultdict(lambda:0)
 switches_dp_port = {}
+port_to_host = {}
+gtimer_count =0
 
 # [sw1][sw2] -> (distance, intermediate)
 path_map = defaultdict(lambda:defaultdict(lambda:(None,None)))
@@ -185,7 +188,88 @@ class TopoSwitch (DHCPD):
     if ipinfo(event.ip)[0] is not self: return
     event.reply = self.mac
 
+  def send_proactive_info(self):
+    if self.connection is None:
+       self.log.debug("Can't send table: disconnected")
+       return
+    #get the data structure
+    #for all the switches apply the rules.
+    #check the incoming port.
+    log1.debug("Reached after 10 seconds")
+    log1.debug(" _proactive_info:Let's set proactively")
+    for ports in self.ports:
+        log1.debug(ports.port_no)
+    #log1.debug(switch_port_map.items())
+    #log1.debug(switches_dp_port.items())
+    switch_port_list =[]
+    value_list1 = []
+    value_list2 = []
+    for key,values in switches_dp_port.items():
+        for value in values:
+            if value not in value_list1:
+                value_list1.append(value)
+    for key,values in switch_port_map.items():
+        for value in values:
+            if value not in value_list2:
+                value_list2.append(value)
+    temp= []
+    for values in value_list2:
+        if values not in value_list1:
+            temp.append(values)
+    #log1.debug(temp)
+    #log1.debug(sorted(value_list1))
+    dupL = value_list1
+    value_list1 = sorted(value_list1)
+    #log1.debug(value_list1)
+    in_port =0
+    for i in temp:
+        if self.dpid == i[0]:
+            for port in self.ports:
+                if i[1] == port.port_no:
+                    in_port = port.port_no
+                    break
+    log1.debug(in_port)
+    out_port=0
+    for i in value_list1:
+        if i[0] ==  self.dpid:
+            out_port = i[1]
+            break
+    log1.debug(out_port)
+    #log1.debug(visited_list)
+    if in_port==0:
+	for i in value_list1:
+	    if i[0] == self.dpid:
+		in_port = i[1]
+    if out_port == 0:
+	for i in value_list1:
+	    if i[0] == self.dpid and i[1]!=in_port:
+		out_port = i[1]
 
+    log1.debug(out_port)
+    log1.debug(in_port)
+    out_port=0
+    #log1.debug(visited_list)
+
+    clear = of.ofp_flow_mod(command=of.OFPFC_DELETE)
+    self.connection.send(clear)
+    self.connection.send(of.ofp_barrier_request())
+
+    # wildcard other entries match on in port and pass the information to 
+    # the controller
+    msg = of.ofp_flow_mod()
+    msg.match = of.ofp_match()
+    msg.match.dl_type = None #pkt.ethernet.IP_TYPE
+    msg.match.nw_proto = None #pkt.ipv4.UDP_PROTOCOL
+    msg.match.nw_dst = None
+
+    msg.match.in_port = in_port
+
+    msg.actions.append(of.ofp_action_output(port = of.OFPP_CONTROLLER))
+    msg.actions.append(of.ofp_action_output(port = out_port))#of.OFPP_FLOOD))
+    self.connection.send(msg)
+    
+
+  
   def send_table (self):
     #log1.debug("SEND_TABLE is called")
     if self.connection is None:
@@ -411,81 +495,132 @@ class TopoSwitch (DHCPD):
 class topo_addressing (object):
   def __init__ (self):
     self.count =0
+    self.timer_count=0
+    self.call_proacitve_info = False
     core.listen_to_dependencies(self, listen_args={'openflow':{'priority':0}})
 
   def _handle_ARPHelper_ARPRequest (self, event):
     pass # Just here to make sure we load it
+  
 
   def _handle_openflow_discovery_LinkEvent (self, event):
     def flip (link):
       return Discovery.Link(link[2],link[3], link[0],link[1])
+    """    
+    def _proactive_info(self):
+        log1.debug(" _proactive_info:Let's set proactively")
+        log1.debug(switch_port_map.items())
+        log1.debug(switches_dp_port.items())
+        switch_port_list =[]
+        value_list1 = []
+        value_list2 = []
+        for key,values in switches_dp_port.items():
+            for value in values:
+                if value not in value_list1:
+                    value_list1.append(value)
+        for key,values in switch_port_map.items():
+            for value in values:
+                log1.debug(value)
+                if value not in value_list2:
+                    value_list2.append(value)
+        temp= []
+        for values in value_list2:
+            if values not in value_list1:
+                temp.append(values)
+        log1.debug(temp )  # From DHCPD
+    """
+       
+
+    #print("LINK_DISCOVERED1")
     l = event.link
     sw1 = switches_by_dpid[l.dpid1]
     sw2 = switches_by_dpid[l.dpid2]
-    log1.debug(sw1)
+
     """
     TEST FOR RESILIENT NETWORK:BEGIN
     """
-    #log1.debug("LET ME SEE WHICH EVENT THIS IS")
-    #log1.debug(event)
     mys = str(l)
     myss = mys.split('->')
-
+    #log1.debug(myss)
+    a=[]
+    b=[]
+    for i in range(len(myss)):
+        a = myss[i].split('.')
+        b.append(a[1].strip())
     if (event.added):
-        switches_dp_port[self.count] = mysss
-        #    switches_dp_port[mysss[i]]
+        tupL1 = [sw1.dpid,int(b[0])]
+        tupL2 = [sw2.dpid,int(b[1])]
+        templ =[tupL1,tupL2]
+        switches_dp_port[self.count] = templ
+        #if (tupL1,tupL2) or (tupL2,tupL1) not in switches_dp_port:
+            #switches_dp_port[self.count] = (tupL1,tupL2)
         self.count += 1
-    log1.debug(switches_dp_port)
-
-    # Invalidate all flows and path info.
-    # For link adds, this makes sure that if a new link leads to an
-    # improved path, we use it.
-    # For link removals, this makes sure that we don't use a
-    # path that may have been broken.
-    #NOTE: This could be radically improved! (e.g., not *ALL* paths break)
+        # Invalidate all flows and path info.
+        # For link adds, this makes sure that if a new link leads to an
+        # improved path, we use it.
+        # For link removals, this makes sure that we don't use a
+        # path that may have been broken.
+        #NOTE: This could be radically improved! (e.g., not *ALL* paths break)
     clear = of.ofp_flow_mod(command=of.OFPFC_DELETE)
     for sw in switches_by_dpid.itervalues():
-      if sw.connection is None: continue
-      sw.connection.send(clear)
+        if sw.connection is None: continue
+        sw.connection.send(clear)
     path_map.clear()
-
     if event.removed:
-      #ADDED FORTEST
-      log1.debug('EVENT REMOVED')
-      for key,value in switches_dp_port.items():
-          if mysss in switches_dp_port:
-              log1.debug(mysss)
-              log1.debug(switches_dp_port[key])
-
-
-      log1.debug(switches_dp_port)
-
-      # This link no longer okay
-      if sw2 in adjacency[sw1]: del adjacency[sw1][sw2]
-      if sw1 in adjacency[sw2]: del adjacency[sw2][sw1]
-
-      # But maybe there's another way to connect these...
-      for ll in core.openflow_discovery.adjacency:
-        if ll.dpid1 == l.dpid1 and ll.dpid2 == l.dpid2:
-          if flip(ll) in core.openflow_discovery.adjacency:
-            # Yup, link goes both ways
-            adjacency[sw1][sw2] = ll.port1
-            adjacency[sw2][sw1] = ll.port2
-            # Fixed -- new link chosen to connect these
-            break
+        #ADDED FORTEST
+        log1.debug('EVENT REMOVED')
+        # This link no longer okay
+        if sw2 in adjacency[sw1]: del adjacency[sw1][sw2]
+	if sw1 in adjacency[sw2]: del adjacency[sw2][sw1]
+        # But maybe there's another way to connect these...
+        for ll in core.openflow_discovery.adjacency:
+            if ll.dpid1 == l.dpid1 and ll.dpid2 == l.dpid2:
+              if flip(ll) in core.openflow_discovery.adjacency:
+                # Yup, link goes both ways
+                adjacency[sw1][sw2] = ll.port1
+                adjacency[sw2][sw1] = ll.port2
+                # Fixed -- new link chosen to connect these
+                break
     else:
-      # If we already consider these nodes connected, we can
-      # ignore this link up.
-      # Otherwise, we might be interested...
-      if adjacency[sw1][sw2] is None:
+        # If we already consider these nodes connected, we can
+        # ignore this link up.
+        # Otherwise, we might be interested...
+        if adjacency[sw1][sw2] is None:
         # These previously weren't connected.  If the link
         # exists in both directions, we consider them connected now.
-        if flip(l) in core.openflow_discovery.adjacency:
-          # Yup, link goes both ways -- connected!
-          adjacency[sw1][sw2] = l.port1
-          adjacency[sw2][sw1] = l.port2
+            if flip(l) in core.openflow_discovery.adjacency:
+              # Yup, link goes both ways -- connected!
+              adjacency[sw1][sw2] = l.port1
+              adjacency[sw2][sw1] = l.port2
+	#log1.debug(adjacency.items())
+    port_list =[]
+    for port in sw1.ports:
+        if port.port_no !=65534:
+            port_list.append([sw1.dpid,port.port_no])
+            if sw1.dpid not in switch_port_map:
+                switch_port_map[sw1.dpid] =port_list
+
+    current_time = int(round(time.time()))
+    if self.timer_count==0:
+        self.timer_count = int(round(time.time()))
+    if ((current_time - self.timer_count)==4):
+        #_proactive_info(self)
+        for sw in switches_by_dpid.itervalues():
+            #sw.send_table
+            sw.send_proactive_info()
+    """
     for sw in switches_by_dpid.itervalues():
-      sw.send_table()
+        #sw.send_table
+        sw.send_proactive_info()
+    
+    current_time = int(round(time.time()))
+    if self.timer_count==0:
+        self.timer_count = int(round(time.time()))
+    if ((current_time - self.timer_count)==4):
+        for sw in switches_by_dpid.itervalues():
+            #sw.send_table
+            sw.send_proactive_info()
+    """
 
 
   def _handle_openflow_ConnectionUp (self, event):
